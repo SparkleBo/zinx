@@ -157,7 +157,7 @@ zinx/
 ├─ zhttp/
 │  ├─ std/           # 基于 net/http 的实现
 │  └─ fast/          # 基于 fasthttp 的实现
-├─ zrouter/          # 路由树与路由器
+├─ zrouter/          # 路由树与 Router 
 ├─ zmw/              # 官方中间件（日志、恢复、CORS、限流、熔断…）
 ├─ zpool/            # 对象池与字节缓冲池
 ├─ zcodec/           # 各种编解码器
