@@ -20,20 +20,17 @@ func TestRouter_ParamMatch(t *testing.T) {
         return nil
     })
 
-    rt, params, ok := r.match("GET", "/users/123")
-    if !ok {
-        t.Fatalf("should match route")
-    }
-    if params["id"] != "123" {
-        t.Fatalf("param id expected 123, got %s", params["id"])
-    }
-    // simulate handler call
+    h, params, mws, ok := r.Find("GET", "/users/123")
+    if !ok { t.Fatalf("should match route") }
+    if params["id"] != "123" { t.Fatalf("param id expected 123, got %s", params["id"]) }
+    // simulate handler call via chain
     rr := httptest.NewRecorder()
     req := httptest.NewRequest("GET", "/users/123", nil)
-    ctx := NewContext(rr, req)
+    ctx := AcquireContext(rr, req)
     ctx.AttachParams(params)
-    final := chain(rt.handler, rt.mws...)
+    final := chain(h, mws...)
     _ = final(ctx)
+    ReleaseContext(ctx)
     if !called {
         t.Fatalf("handler not called")
     }
@@ -42,16 +39,15 @@ func TestRouter_ParamMatch(t *testing.T) {
 func TestRouter_Wildcard(t *testing.T) {
     r := NewRouter()
     r.Handle("GET", "/static/*", func(ctx ziface.Context) error { return ctx.String(200, "ok") })
-    rt, params, ok := r.match("GET", "/static/css/app.css")
-    if !ok || rt == nil {
-        t.Fatalf("wildcard route should match")
-    }
+    h, params, mws, ok := r.Find("GET", "/static/css/app.css")
+    if !ok || h == nil { t.Fatalf("wildcard route should match") }
     rr := httptest.NewRecorder()
     req := httptest.NewRequest("GET", "/static/css/app.css", nil)
-    ctx := NewContext(rr, req)
+    ctx := AcquireContext(rr, req)
     ctx.AttachParams(params)
-    final := chain(rt.handler, rt.mws...)
+    final := chain(h, mws...)
     _ = final(ctx)
+    ReleaseContext(ctx)
     if rr.Code != 200 {
         t.Fatalf("expected 200, got %d", rr.Code)
     }
@@ -61,10 +57,8 @@ func TestRouter_Group(t *testing.T) {
     r := NewRouter()
     g := r.Group("/api")
     g.Handle("GET", "/v1/ping", func(ctx ziface.Context) error { return ctx.String(200, "pong") })
-    rt, _, ok := r.match("GET", "/api/v1/ping")
-    if !ok || rt == nil {
-        t.Fatalf("group route should match via parent router")
-    }
+    h, _, _, ok := r.Find("GET", "/api/v1/ping")
+    if !ok || h == nil { t.Fatalf("group route should match via parent router") }
 }
 
 // --- Context unit tests ---
@@ -95,17 +89,18 @@ func BenchmarkRouting_Static(b *testing.B) {
     r.Handle("GET", "/", func(ctx ziface.Context) error { return ctx.Bytes(200, []byte("ok")) })
     rr := httptest.NewRecorder()
     req := httptest.NewRequest("GET", "/", nil)
-    rt, params, ok := r.match("GET", "/")
+    h, params, mws, ok := r.Find("GET", "/")
     if !ok { b.Fatal("no match") }
-    ctx := NewContext(rr, req)
+    ctx := AcquireContext(rr, req)
     ctx.AttachParams(params)
-    final := chain(rt.handler, rt.mws...)
+    final := chain(h, mws...)
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
         rr = httptest.NewRecorder()
         ctx.w = rr
         _ = final(ctx)
     }
+    ReleaseContext(ctx)
 }
 
 func BenchmarkRouting_Param(b *testing.B) {
@@ -113,15 +108,16 @@ func BenchmarkRouting_Param(b *testing.B) {
     r.Handle("GET", "/users/:id", func(ctx ziface.Context) error { return ctx.Bytes(200, []byte(ctx.Param("id"))) })
     rr := httptest.NewRecorder()
     req := httptest.NewRequest("GET", "/users/123", nil)
-    rt, params, ok := r.match("GET", "/users/123")
+    h, params, mws, ok := r.Find("GET", "/users/123")
     if !ok { b.Fatal("no match") }
-    ctx := NewContext(rr, req)
+    ctx := AcquireContext(rr, req)
     ctx.AttachParams(params)
-    final := chain(rt.handler, rt.mws...)
+    final := chain(h, mws...)
     b.ResetTimer()
     for i := 0; i < b.N; i++ {
         rr = httptest.NewRecorder()
         ctx.w = rr
         _ = final(ctx)
     }
+    ReleaseContext(ctx)
 }

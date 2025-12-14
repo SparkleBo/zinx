@@ -1,24 +1,25 @@
 package std
 
 import (
-    "context"
-    "fmt"
-    "net/http"
-    "time"
+	"context"
+	"fmt"
+	"net/http"
+	"time"
 
-    "github.com/SparkleBo/zinx/ziface"
+	"github.com/SparkleBo/zinx/ziface"
+	"github.com/SparkleBo/zinx/zrouter"
 )
 
 // Server 基于 net/http 的高性能可扩展服务器（MVP）
 type Server struct {
     addr       string
-    router     *Router
+    router     ziface.Router
     mws        []ziface.Middleware
     httpServer *http.Server
 }
 
 func New(addr string) *Server {
-    return &Server{addr: addr, router: NewRouter()}
+    return &Server{addr: addr, router: zrouter.New()}
 }
 
 // Use 注册全局中间件
@@ -29,7 +30,7 @@ func (s *Server) Route(method, path string, h ziface.Handler, mws ...ziface.Midd
     s.router.Handle(method, path, h, mws...)
 }
 
-// Group 返回带前缀与中间件的子路由器（便于模块化）
+// Group 返回带前缀与中间件的子 Router （便于模块化）
 func (s *Server) Group(prefix string, mws ...ziface.Middleware) ziface.Router {
     return s.router.Group(prefix, mws...)
 }
@@ -40,21 +41,18 @@ func (s *Server) Start() {
         return
     }
     handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        rt, params, ok := s.router.match(r.Method, r.URL.Path)
+        h, params, mws, ok := s.router.Find(r.Method, r.URL.Path)
         if !ok {
             http.NotFound(w, r)
             return
         }
-        ctx := NewContext(w, r)
-        if len(params) > 0 {
-            ctx.AttachParams(params)
-        }
-        // 组合全局与路由中间件
-        final := chain(rt.handler, append(s.mws, rt.mws...)...)
+        ctx := AcquireContext(w, r)
+        if len(params) > 0 { ctx.AttachParams(params) }
+        final := chain(h, append(s.mws, mws...)...)
         if err := final(ctx); err != nil {
-            // 简单错误处理：500 输出错误信息（生产中可统一处理）
             _ = ctx.String(http.StatusInternalServerError, fmt.Sprintf("internal error: %v", err))
         }
+        ReleaseContext(ctx)
     })
 
     s.httpServer = &http.Server{Addr: s.addr, Handler: handler}
@@ -93,4 +91,3 @@ func chain(h ziface.Handler, mws ...ziface.Middleware) ziface.Handler {
     }
     return final
 }
-

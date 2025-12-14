@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/SparkleBo/zinx/ziface"
@@ -17,14 +18,32 @@ type StdContext struct {
     params  map[string]string
 }
 
-func NewContext(w http.ResponseWriter, r *http.Request) *StdContext {
-    return &StdContext{
-        w:       w,
-        r:       r,
-        storage: make(map[string]any),
-        params:  make(map[string]string),
-    }
+// --- pooling ---
+var ctxPool = sync.Pool{New: func() any {
+    return &StdContext{storage: make(map[string]any), params: make(map[string]string)}
+}}
+
+// AcquireContext 从对象池获取并初始化请求相关字段
+func AcquireContext(w http.ResponseWriter, r *http.Request) *StdContext {
+    c := ctxPool.Get().(*StdContext)
+    c.w = w
+    c.r = r
+    // storage/params 在 Release 时已经清理，可直接复用
+    return c
 }
+
+// ReleaseContext 将上下文归还对象池，清理请求相关状态
+func ReleaseContext(c *StdContext) {
+    // 清空共享状态与参数，避免数据泄露到下一次请求
+    for k := range c.storage { delete(c.storage, k) }
+    for k := range c.params { delete(c.params, k) }
+    c.w = nil
+    c.r = nil
+    ctxPool.Put(c)
+}
+
+// NewContext 为兼容旧用法，内部走对象池
+func NewContext(w http.ResponseWriter, r *http.Request) *StdContext { return AcquireContext(w, r) }
 
 // AttachParams 设置路由参数
 func (c *StdContext) AttachParams(p map[string]string) {
@@ -74,4 +93,3 @@ func (c *StdContext) Bytes(code int, b []byte) error {
 
 // 确保 StdContext 满足 ziface.Context 接口（编译期断言）
 var _ ziface.Context = (*StdContext)(nil)
-
